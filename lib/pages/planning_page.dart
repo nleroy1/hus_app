@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart'; // Import pour le stockage local
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/data_models.dart';
 
 class PlanningPage extends StatefulWidget {
@@ -16,7 +16,8 @@ class PlanningPage extends StatefulWidget {
 }
 
 class _PlanningPageState extends State<PlanningPage> {
-  final String scriptUrl = "https://script.google.com/macros/s/AKfycbz_5zVeNdOK64Qas3pu0w7aD34941FwjR9-ANjRxTFIDjAixVaKzAdcSkEGpWJNePeHOg/exec";
+  final String scriptUrl =
+      "https://script.google.com/macros/s/AKfycbz_5zVeNdOK64Qas3pu0w7aD34941FwjR9-ANjRxTFIDjAixVaKzAdcSkEGpWJNePeHOg/exec";
   static const String _cacheKey = 'planning_events_cache';
 
   DateTime _focusedDay = DateTime.now();
@@ -25,7 +26,6 @@ class _PlanningPageState extends State<PlanningPage> {
   bool _isLoading = false;
 
   final Map<DateTime, List<EvenementDetails>> _evenements = {};
-  final TextEditingController _commentController = TextEditingController();
 
   @override
   void initState() {
@@ -34,19 +34,10 @@ class _PlanningPageState extends State<PlanningPage> {
       setState(() {
         _isInitialized = true;
       });
-      
-      // 1. Charger immédiatement le dernier backup local (dispo instantanément hors-ligne)
-      await _chargerDonneesLocales();
 
-      // 2. Tenter de rafraîchir en arrière-plan depuis le réseau si disponible
+      await _chargerDonneesLocales();
       _chargerDonneesDistantes();
     });
-  }
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
   }
 
   // --- GESTION DU CACHE LOCAL (HORS-LIGNE) ---
@@ -87,10 +78,12 @@ class _PlanningPageState extends State<PlanningPage> {
       Map<String, dynamic> encoderMap = {};
 
       _evenements.forEach((date, evs) {
-        encoderMap[date.toIso8601String()] = evs.map((e) => {
-          'categorie': e.categorie.name,
-          'label': e.label,
-        }).toList();
+        encoderMap[date.toIso8601String()] = evs
+            .map((e) => {
+                  'categorie': e.categorie.name,
+                  'label': e.label,
+                })
+            .toList();
       });
 
       await prefs.setString(_cacheKey, jsonEncode(encoderMap));
@@ -99,21 +92,22 @@ class _PlanningPageState extends State<PlanningPage> {
     }
   }
 
-  // --- CHARGEMENT DISTANT (AVEC GESTION DU RÉSEAU) ---
+  // --- CHARGEMENT DISTANT ---
 
   Future<void> _chargerDonneesDistantes() async {
-    // On n'affiche le loader visuel que si on n'a vraiment aucune donnée affichée
     if (_evenements.isEmpty) {
       setState(() => _isLoading = true);
     }
 
     try {
-      final response = await http.get(Uri.parse("$scriptUrl?action=get")).timeout(const Duration(seconds: 5));
+      final response = await http
+          .get(Uri.parse("$scriptUrl?action=get"))
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           final List rows = data['events'];
-          
+
           Map<DateTime, List<EvenementDetails>> tempEvents = {};
 
           for (var row in rows) {
@@ -125,15 +119,16 @@ class _PlanningPageState extends State<PlanningPage> {
 
             if (day != null && month != null && year != null) {
               DateTime dateNormalisee = DateTime(year, month + 1, day);
-              
+
               TypeEvenement type = TypeEvenement.autre;
               String catLower = catStr.toLowerCase();
-              
+
               if (catLower == 'jour' || catLower.contains('jour')) {
                 type = TypeEvenement.jour;
               } else if (catLower == 'nuit' || catLower.contains('nuit')) {
                 type = TypeEvenement.nuit;
-              } else if (catLower == 'deplacement' || catLower.contains('deplacement')) {
+              } else if (catLower == 'deplacement' ||
+                  catLower.contains('deplacement')) {
                 type = TypeEvenement.deplacement;
               } else if (catLower == 'conge' || catLower.contains('conge')) {
                 type = TypeEvenement.conge;
@@ -142,7 +137,8 @@ class _PlanningPageState extends State<PlanningPage> {
               }
 
               tempEvents.putIfAbsent(dateNormalisee, () => []);
-              tempEvents[dateNormalisee]!.add(EvenementDetails(categorie: type, label: label));
+              tempEvents[dateNormalisee]!
+                  .add(EvenementDetails(categorie: type, label: label));
             }
           }
 
@@ -151,13 +147,11 @@ class _PlanningPageState extends State<PlanningPage> {
             _evenements.addAll(tempEvents);
           });
 
-          // Sauvegarde automatique du nouveau backup local après un succès réseau
           await _sauvegarderDonneesLocales();
         }
       }
     } catch (e) {
       debugPrint("Mode hors-ligne ou erreur réseau : $e");
-      // L'application continue d'utiliser tranquillement les données du cache local sans bloquer l'utilisateur.
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -165,26 +159,38 @@ class _PlanningPageState extends State<PlanningPage> {
     }
   }
 
-  Future<void> _sauvegarderEvenement(DateTime date, TypeEvenement type, String defaultLabel) async {
+  Future<void> _sauvegarderEvenement(
+    DateTime date,
+    TypeEvenement type,
+    String defaultLabel,
+    String comment, {
+    int? indexToEdit,
+  }) async {
     final dateNormalisee = DateTime(date.year, date.month, date.day);
-    String comment = _commentController.text.trim();
-    
+
     String finalLabel = defaultLabel;
     if (defaultLabel.isEmpty) {
       finalLabel = comment;
     } else if (comment.isNotEmpty) {
-      finalLabel = "$defaultLabel: $comment";
+      finalLabel = "$defaultLabel : $comment";
     }
 
-    String dateStr = "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
+    String dateStr =
+        "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
 
     setState(() {
       _evenements.putIfAbsent(dateNormalisee, () => []);
-      _evenements[dateNormalisee]!.add(EvenementDetails(categorie: type, label: finalLabel));
+      if (indexToEdit != null &&
+          indexToEdit < _evenements[dateNormalisee]!.length) {
+        _evenements[dateNormalisee]![indexToEdit] =
+            EvenementDetails(categorie: type, label: finalLabel);
+      } else {
+        _evenements[dateNormalisee]!
+            .add(EvenementDetails(categorie: type, label: finalLabel));
+      }
       _isLoading = true;
     });
 
-    // Sauvegarde immédiate dans le cache local
     await _sauvegarderDonneesLocales();
 
     try {
@@ -199,27 +205,45 @@ class _PlanningPageState extends State<PlanningPage> {
         }),
       );
     } catch (e) {
-      debugPrint("Action enregistrée localement, mais échec de transmission réseau (Hors-ligne) : $e");
+      debugPrint("Échec de transmission réseau : $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Enregistré hors-ligne (synchronisation ultérieure requise)")),
+          const SnackBar(
+              content: Text("Enregistré hors-ligne (synchro ultérieure)")),
         );
       }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _supprimerEvenementIndex(DateTime date, int index) async {
+    final dateNormalisee = DateTime(date.year, date.month, date.day);
+    if (_evenements.containsKey(dateNormalisee)) {
+      setState(() {
+        _evenements[dateNormalisee]!.removeAt(index);
+        if (_evenements[dateNormalisee]!.isEmpty) {
+          _evenements.remove(dateNormalisee);
+        }
+      });
+      await _sauvegarderDonneesLocales();
+
+      if (_getEvenementsPourJour(date).isEmpty) {
+        await _effacerJour(date);
+      }
     }
   }
 
   Future<void> _effacerJour(DateTime date) async {
     final dateNormalisee = DateTime(date.year, date.month, date.day);
-    String dateStr = "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
+    String dateStr =
+        "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
 
     setState(() {
       _evenements.remove(dateNormalisee);
       _isLoading = true;
     });
 
-    // Mise à jour immédiate du cache local
     await _sauvegarderDonneesLocales();
 
     try {
@@ -233,7 +257,7 @@ class _PlanningPageState extends State<PlanningPage> {
     } catch (e) {
       debugPrint("Erreur suppression réseau : $e");
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -244,21 +268,31 @@ class _PlanningPageState extends State<PlanningPage> {
 
   Color _getCouleurEvenement(TypeEvenement type) {
     switch (type) {
-      case TypeEvenement.jour: return const Color(0xFFFFB3B3);
-      case TypeEvenement.nuit: return const Color(0xFFB3D9FF);
-      case TypeEvenement.conge: return const Color(0xFFFFD700);
-      case TypeEvenement.deplacement: return const Color(0xFFD1B3FF);
-      case TypeEvenement.autre: return const Color(0xFFE0E0E0);
+      case TypeEvenement.jour:
+        return const Color(0xFFFFB3B3);
+      case TypeEvenement.nuit:
+        return const Color(0xFFB3D9FF);
+      case TypeEvenement.conge:
+        return const Color(0xFFFFD700);
+      case TypeEvenement.deplacement:
+        return const Color(0xFFD1B3FF);
+      case TypeEvenement.autre:
+        return const Color(0xFFE0E0E0);
     }
   }
 
   Color _getTextColorEvenement(TypeEvenement type) {
     switch (type) {
-      case TypeEvenement.jour: return const Color(0xFF7b241c);
-      case TypeEvenement.nuit: return const Color(0xFF0e6251);
-      case TypeEvenement.conge: return const Color(0xFF7e5109);
-      case TypeEvenement.deplacement: return const Color(0xFF512e5f);
-      case TypeEvenement.autre: return const Color(0xFF333333);
+      case TypeEvenement.jour:
+        return const Color(0xFF7B241C);
+      case TypeEvenement.nuit:
+        return const Color(0xFF0E6251);
+      case TypeEvenement.conge:
+        return const Color(0xFF7E5109);
+      case TypeEvenement.deplacement:
+        return const Color(0xFF512E5F);
+      case TypeEvenement.autre:
+        return const Color(0xFF333333);
     }
   }
 
@@ -298,7 +332,8 @@ class _PlanningPageState extends State<PlanningPage> {
                   headerStyle: const HeaderStyle(
                     formatButtonVisible: false,
                     titleCentered: true,
-                    titleTextStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    titleTextStyle:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
                   onDaySelected: (selectedDay, focusedDay) {
@@ -317,9 +352,12 @@ class _PlanningPageState extends State<PlanningPage> {
                     outsideDaysVisible: false,
                   ),
                   calendarBuilders: CalendarBuilders(
-                    selectedBuilder: (context, day, focusedDay) => _buildDayCell(day, isSelected: true),
-                    todayBuilder: (context, day, focusedDay) => _buildDayCell(day, isToday: true),
-                    defaultBuilder: (context, day, focusedDay) => _buildDayCell(day),
+                    selectedBuilder: (context, day, focusedDay) =>
+                        _buildDayCell(day, isSelected: true),
+                    todayBuilder: (context, day, focusedDay) =>
+                        _buildDayCell(day, isToday: true),
+                    defaultBuilder: (context, day, focusedDay) =>
+                        _buildDayCell(day),
                   ),
                 ),
               ),
@@ -335,7 +373,8 @@ class _PlanningPageState extends State<PlanningPage> {
     );
   }
 
-  Widget _buildDayCell(DateTime day, {bool isSelected = false, bool isToday = false}) {
+  Widget _buildDayCell(DateTime day,
+      {bool isSelected = false, bool isToday = false}) {
     final evs = _getEvenementsPourJour(day);
 
     return Container(
@@ -371,7 +410,8 @@ class _PlanningPageState extends State<PlanningPage> {
                 final ev = evs[index];
                 return Container(
                   margin: const EdgeInsets.only(bottom: 1.0),
-                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
                   decoration: BoxDecoration(
                     color: _getCouleurEvenement(ev.categorie),
                     borderRadius: BorderRadius.circular(2),
@@ -395,107 +435,333 @@ class _PlanningPageState extends State<PlanningPage> {
     );
   }
 
+  // --- MODALE DE DÉTAIL / ÉDITION AGRANDIE AVEC CASES ---
+
   void _afficherOptionsDate(BuildContext context, DateTime date) {
-    _commentController.clear();
+    TypeEvenement selectedType = TypeEvenement.jour;
+    int? editingIndex;
+    final TextEditingController noteController = TextEditingController();
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 20, right: 20, top: 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Modifier la journée du ${date.day}/${date.month}/${date.year}",
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _commentController,
-              decoration: const InputDecoration(
-                hintText: "Note (ex: Barbecue, RDV...)",
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 15),
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              childAspectRatio: 3,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFB3B3)),
-                  onPressed: () {
-                    _sauvegarderEvenement(date, TypeEvenement.jour, "J");
-                    Navigator.pop(context);
-                  },
-                  child: const Text("Jour (J)", style: TextStyle(color: Colors.black87)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB3D9FF)),
-                  onPressed: () {
-                    _sauvegarderEvenement(date, TypeEvenement.nuit, "N");
-                    Navigator.pop(context);
-                  },
-                  child: const Text("Nuit (N)", style: TextStyle(color: Colors.black87)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD1B3FF)),
-                  onPressed: () {
-                    _sauvegarderEvenement(date, TypeEvenement.deplacement, "Déplacement");
-                    Navigator.pop(context);
-                  },
-                  child: const Text("Déplacement", style: TextStyle(color: Colors.black87)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
-                  onPressed: () {
-                    _sauvegarderEvenement(date, TypeEvenement.conge, "C");
-                    Navigator.pop(context, true);
-                  },
-                  child: const Text("Congé (C)", style: TextStyle(color: Colors.black87)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF9b59b6),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  _sauvegarderEvenement(date, TypeEvenement.autre, "");
-                  Navigator.pop(context);
-                },
-                child: const Text("Note Seule"),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                onPressed: () {
-                  _effacerJour(date);
-                  Navigator.pop(context);
-                },
-                child: const Text("🗑️ Tout effacer ce jour"),
-              ),
-            ),
-            const SizedBox(height: 15),
-          ],
-        ),
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      builder: (modalContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final events = _getEvenementsPourJour(date);
+
+            void reinitialiserFormulaire() {
+              setModalState(() {
+                editingIndex = null;
+                selectedType = TypeEvenement.jour;
+                noteController.clear();
+              });
+            }
+
+            void chargerPourEdition(int index) {
+              final ev = events[index];
+              setModalState(() {
+                editingIndex = index;
+                selectedType = ev.categorie;
+                noteController.text = ev.label;
+              });
+            }
+
+            String getDefaultPrefix(TypeEvenement type) {
+              switch (type) {
+                case TypeEvenement.jour:
+                  return "J";
+                case TypeEvenement.nuit:
+                  return "N";
+                case TypeEvenement.conge:
+                  return "C";
+                case TypeEvenement.deplacement:
+                  return "Déplacement";
+                case TypeEvenement.autre:
+                  return "";
+              }
+            }
+
+            Widget buildCategoryTile(TypeEvenement type, String label) {
+              final isSelected = selectedType == type;
+              final color = _getCouleurEvenement(type);
+              final textColor = _getTextColorEvenement(type);
+
+              return InkWell(
+                onTap: () {
+                  setModalState(() {
+                    selectedType = type;
+                  });
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected ? Colors.black87 : Colors.transparent,
+                      width: isSelected ? 2.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (isSelected)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4.0),
+                          child: Icon(Icons.check_circle,
+                              size: 16, color: textColor),
+                        ),
+                      Flexible(
+                        child: Text(
+                          label,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                left: 16,
+                right: 16,
+                top: 16,
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Journée du ${date.day}/${date.month}/${date.year}",
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(modalContext),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 1. Événements enregistrés
+                          const Text(
+                            "Événements enregistrés :",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          const SizedBox(height: 6),
+                          if (events.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8.0),
+                              child: Text("Aucun élément pour ce jour.",
+                                  style: TextStyle(color: Colors.grey)),
+                            )
+                          else
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: events.length,
+                              itemBuilder: (ctx, index) {
+                                final ev = events[index];
+                                final isEditingThis = editingIndex == index;
+
+                                return Container(
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _getCouleurEvenement(ev.categorie)
+                                        .withOpacity(0.3),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: isEditingThis
+                                        ? Border.all(
+                                            color: Colors.blue, width: 2)
+                                        : null,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Chip(
+                                      label: Text(
+                                        ev.categorie.name.toUpperCase(),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: _getTextColorEvenement(
+                                              ev.categorie),
+                                        ),
+                                      ),
+                                      backgroundColor:
+                                          _getCouleurEvenement(ev.categorie),
+                                    ),
+                                    title: Text(
+                                      ev.label,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit,
+                                              size: 20, color: Colors.blue),
+                                          onPressed: () =>
+                                              chargerPourEdition(index),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete,
+                                              size: 20, color: Colors.red),
+                                          onPressed: () async {
+                                            await _supprimerEvenementIndex(
+                                                date, index);
+                                            setModalState(() {});
+                                            reinitialiserFormulaire();
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+
+                          const SizedBox(height: 12),
+                          const Divider(),
+
+                          // 2. Grille de sélection des catégories
+                          Text(
+                            editingIndex == null
+                                ? "Ajouter un élément :"
+                                : "Modifier l'élément sélectionné :",
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          const SizedBox(height: 10),
+
+                          GridView.count(
+                            crossAxisCount: 2,
+                            shrinkWrap: true,
+                            childAspectRatio: 2.8,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            physics: const NeverScrollableScrollPhysics(),
+                            children: [
+                              buildCategoryTile(
+                                  TypeEvenement.jour, "Jour (J)"),
+                              buildCategoryTile(
+                                  TypeEvenement.nuit, "Nuit (N)"),
+                              buildCategoryTile(
+                                  TypeEvenement.deplacement, "Déplacement"),
+                              buildCategoryTile(
+                                  TypeEvenement.conge, "Congé (C)"),
+                              buildCategoryTile(
+                                  TypeEvenement.autre, "Autre / Note"),
+                            ],
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          TextField(
+                            controller: noteController,
+                            decoration: const InputDecoration(
+                              labelText: "Note / Détail (ex : Barbecue, RDV...)",
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          Row(
+                            children: [
+                              if (editingIndex != null)
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: OutlinedButton(
+                                      onPressed: reinitialiserFormulaire,
+                                      child: const Text("Annuler"),
+                                    ),
+                                  ),
+                                ),
+                              Expanded(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF4A6B5B),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                  ),
+                                  onPressed: () async {
+                                    final defaultPrefix =
+                                        getDefaultPrefix(selectedType);
+                                    final note = noteController.text.trim();
+
+                                    await _sauvegarderEvenement(
+                                      date,
+                                      selectedType,
+                                      defaultPrefix,
+                                      note,
+                                      indexToEdit: editingIndex,
+                                    );
+
+                                    setModalState(() {});
+                                    reinitialiserFormulaire();
+                                  },
+                                  child: Text(editingIndex == null
+                                      ? "Ajouter"
+                                      : "Mettre à jour"),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          if (events.isNotEmpty)
+                            SizedBox(
+                              width: double.infinity,
+                              child: TextButton.icon(
+                                style: TextButton.styleFrom(
+                                    foregroundColor: Colors.red),
+                                icon: const Icon(Icons.delete_forever),
+                                label: const Text("Tout effacer pour ce jour"),
+                                onPressed: () async {
+                                  await _effacerJour(date);
+                                  setModalState(() {});
+                                  reinitialiserFormulaire();
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

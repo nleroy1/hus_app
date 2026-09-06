@@ -15,7 +15,7 @@ class BudgetPage extends StatefulWidget {
 class _BudgetPageState extends State<BudgetPage> {
   final String scriptUrl = "https://script.google.com/macros/s/AKfycbzv6U1t775NxbBU7V4pqTIoAI4d7AmFRkoGCuNyBz2FfnlJ-qdBBJ7pQKesWQSU9Qju/exec";
   String _moisSelectionne = "Septembre";
-  String _anneeSelectionnee = "2026";
+  final String _anneeSelectionnee = "2026";
   final List<String> _listeMois = ["Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"];
 
   // 0 = Budget Prévisionnel, 1 = Dépenses Réelles
