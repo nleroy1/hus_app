@@ -27,6 +27,12 @@ class _PlanningPageState extends State<PlanningPage> {
 
   final Map<DateTime, List<EvenementDetails>> _evenements = {};
 
+  String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+  String _formatDateStr(DateTime date) {
+    return "${_twoDigits(date.day)}/${_twoDigits(date.month)}/${date.year}";
+  }
+
   @override
   void initState() {
     super.initState();
@@ -40,7 +46,7 @@ class _PlanningPageState extends State<PlanningPage> {
     });
   }
 
-  // --- GESTION DU CACHE LOCAL (HORS-LIGNE) ---
+  // --- GESTION DU CACHE LOCAL ---
 
   Future<void> _chargerDonneesLocales() async {
     try {
@@ -92,7 +98,7 @@ class _PlanningPageState extends State<PlanningPage> {
     }
   }
 
-  // --- CHARGEMENT DISTANT ---
+  // --- CHARGEMENT DISTANT (MANUEL / INITIAL) ---
 
   Future<void> _chargerDonneesDistantes() async {
     if (_evenements.isEmpty) {
@@ -159,6 +165,53 @@ class _PlanningPageState extends State<PlanningPage> {
     }
   }
 
+  // --- SYNCHRONISATION EN ARRIÈRE-PLAN ---
+
+  Future<void> _synchroniserJourneeArrierePlan(DateTime date) async {
+    final dateNormalisee = DateTime(date.year, date.month, date.day);
+    final dateStr = _formatDateStr(date);
+    final listEvents = List<EvenementDetails>.from(_evenements[dateNormalisee] ?? []);
+
+    try {
+      // 1. Efface la journée sur le serveur
+      await http.post(
+        Uri.parse(scriptUrl),
+        body: jsonEncode({
+          "action": "clear",
+          "dateStr": dateStr,
+        }),
+      );
+
+      // 2. Envoie à nouveau les éléments restants
+      for (var ev in listEvents) {
+        String defaultPrefix = _getDefaultPrefix(ev.categorie);
+        String comment = "";
+
+        if (ev.label.contains(" : ")) {
+          final parts = ev.label.split(" : ");
+          comment = parts.sublist(1).join(" : ");
+        } else if (ev.label != defaultPrefix) {
+          comment = ev.label;
+        }
+
+        await http.post(
+          Uri.parse(scriptUrl),
+          body: jsonEncode({
+            "action": "save",
+            "dateStr": dateStr,
+            "category": ev.categorie.name,
+            "label": defaultPrefix,
+            "comment": comment,
+          }),
+        );
+      }
+    } catch (e) {
+      debugPrint("Échec de la synchro en arrière-plan : $e");
+    }
+  }
+
+  // --- ACTIONS LOCALES INSTANTANÉES ---
+
   Future<void> _sauvegarderEvenement(
     DateTime date,
     TypeEvenement type,
@@ -175,9 +228,7 @@ class _PlanningPageState extends State<PlanningPage> {
       finalLabel = "$defaultLabel : $comment";
     }
 
-    String dateStr =
-        "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
-
+    // Mise à jour immédiate de l'UI
     setState(() {
       _evenements.putIfAbsent(dateNormalisee, () => []);
       if (indexToEdit != null &&
@@ -188,33 +239,11 @@ class _PlanningPageState extends State<PlanningPage> {
         _evenements[dateNormalisee]!
             .add(EvenementDetails(categorie: type, label: finalLabel));
       }
-      _isLoading = true;
     });
 
+    // Enregistrement rapide en local puis envoi silencieux
     await _sauvegarderDonneesLocales();
-
-    try {
-      await http.post(
-        Uri.parse(scriptUrl),
-        body: jsonEncode({
-          "action": "save",
-          "dateStr": dateStr,
-          "category": type.name,
-          "label": defaultLabel,
-          "comment": comment,
-        }),
-      );
-    } catch (e) {
-      debugPrint("Échec de transmission réseau : $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Enregistré hors-ligne (synchro ultérieure)")),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    _synchroniserJourneeArrierePlan(date);
   }
 
   Future<void> _supprimerEvenementIndex(DateTime date, int index) async {
@@ -227,43 +256,39 @@ class _PlanningPageState extends State<PlanningPage> {
         }
       });
       await _sauvegarderDonneesLocales();
-
-      if (_getEvenementsPourJour(date).isEmpty) {
-        await _effacerJour(date);
-      }
+      _synchroniserJourneeArrierePlan(date);
     }
   }
 
   Future<void> _effacerJour(DateTime date) async {
     final dateNormalisee = DateTime(date.year, date.month, date.day);
-    String dateStr =
-        "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
 
     setState(() {
       _evenements.remove(dateNormalisee);
-      _isLoading = true;
     });
 
     await _sauvegarderDonneesLocales();
-
-    try {
-      await http.post(
-        Uri.parse(scriptUrl),
-        body: jsonEncode({
-          "action": "clear",
-          "dateStr": dateStr,
-        }),
-      );
-    } catch (e) {
-      debugPrint("Erreur suppression réseau : $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    _synchroniserJourneeArrierePlan(date);
   }
 
   List<EvenementDetails> _getEvenementsPourJour(DateTime day) {
     final dateNormalisee = DateTime(day.year, day.month, day.day);
     return _evenements[dateNormalisee] ?? [];
+  }
+
+  String _getDefaultPrefix(TypeEvenement type) {
+    switch (type) {
+      case TypeEvenement.jour:
+        return "J";
+      case TypeEvenement.nuit:
+        return "N";
+      case TypeEvenement.conge:
+        return "C";
+      case TypeEvenement.deplacement:
+        return "Déplacement";
+      case TypeEvenement.autre:
+        return "";
+    }
   }
 
   Color _getCouleurEvenement(TypeEvenement type) {
@@ -394,7 +419,7 @@ class _PlanningPageState extends State<PlanningPage> {
           Align(
             alignment: Alignment.topRight,
             child: Text(
-              '${day.day}',
+              _twoDigits(day.day),
               style: TextStyle(
                 fontSize: 9.5,
                 fontWeight: FontWeight.bold,
@@ -435,7 +460,7 @@ class _PlanningPageState extends State<PlanningPage> {
     );
   }
 
-  // --- MODALE DE DÉTAIL / ÉDITION AGRANDIE AVEC CASES ---
+  // --- MODALE DE DÉTAIL ET D'ÉDITION ---
 
   void _afficherOptionsDate(BuildContext context, DateTime date) {
     TypeEvenement selectedType = TypeEvenement.jour;
@@ -467,23 +492,17 @@ class _PlanningPageState extends State<PlanningPage> {
               setModalState(() {
                 editingIndex = index;
                 selectedType = ev.categorie;
-                noteController.text = ev.label;
-              });
-            }
 
-            String getDefaultPrefix(TypeEvenement type) {
-              switch (type) {
-                case TypeEvenement.jour:
-                  return "J";
-                case TypeEvenement.nuit:
-                  return "N";
-                case TypeEvenement.conge:
-                  return "C";
-                case TypeEvenement.deplacement:
-                  return "Déplacement";
-                case TypeEvenement.autre:
-                  return "";
-              }
+                String defaultPrefix = _getDefaultPrefix(ev.categorie);
+                if (ev.label.contains(" : ")) {
+                  noteController.text =
+                      ev.label.split(" : ").sublist(1).join(" : ");
+                } else if (ev.label != defaultPrefix) {
+                  noteController.text = ev.label;
+                } else {
+                  noteController.clear();
+                }
+              });
             }
 
             Widget buildCategoryTile(TypeEvenement type, String label) {
@@ -549,7 +568,7 @@ class _PlanningPageState extends State<PlanningPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "Journée du ${date.day}/${date.month}/${date.year}",
+                        "Journée du ${_formatDateStr(date)}",
                         style: const TextStyle(
                             fontSize: 18, fontWeight: FontWeight.bold),
                       ),
@@ -565,7 +584,6 @@ class _PlanningPageState extends State<PlanningPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 1. Événements enregistrés
                           const Text(
                             "Événements enregistrés :",
                             style: TextStyle(
@@ -648,7 +666,6 @@ class _PlanningPageState extends State<PlanningPage> {
                           const SizedBox(height: 12),
                           const Divider(),
 
-                          // 2. Grille de sélection des catégories
                           Text(
                             editingIndex == null
                                 ? "Ajouter un élément :"
@@ -713,7 +730,7 @@ class _PlanningPageState extends State<PlanningPage> {
                                   ),
                                   onPressed: () async {
                                     final defaultPrefix =
-                                        getDefaultPrefix(selectedType);
+                                        _getDefaultPrefix(selectedType);
                                     final note = noteController.text.trim();
 
                                     await _sauvegarderEvenement(
